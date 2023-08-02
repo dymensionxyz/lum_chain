@@ -14,8 +14,9 @@ import (
 	capabilitytypes "github.com/cosmos/cosmos-sdk/x/capability/types"
 	crisiskeeper "github.com/cosmos/cosmos-sdk/x/crisis/keeper"
 	crisistypes "github.com/cosmos/cosmos-sdk/x/crisis/types"
-	distr "github.com/cosmos/cosmos-sdk/x/distribution"
-	distrkeeper "github.com/cosmos/cosmos-sdk/x/distribution/keeper"
+
+	// distr "github.com/cosmos/cosmos-sdk/x/distribution"
+	// distrkeeper "github.com/cosmos/cosmos-sdk/x/distribution/keeper"
 	distrtypes "github.com/cosmos/cosmos-sdk/x/distribution/types"
 	evidencekeeper "github.com/cosmos/cosmos-sdk/x/evidence/keeper"
 	evidencetypes "github.com/cosmos/cosmos-sdk/x/evidence/types"
@@ -68,6 +69,14 @@ import (
 	"github.com/lum-network/chain/x/millions"
 	millionskeeper "github.com/lum-network/chain/x/millions/keeper"
 	millionstypes "github.com/lum-network/chain/x/millions/types"
+
+	//dymension
+	sdkdistrkeeper "github.com/cosmos/cosmos-sdk/x/distribution/keeper"
+	distr "github.com/dymensionxyz/dymension-rdk/x/dist"
+	distrkeeper "github.com/dymensionxyz/dymension-rdk/x/dist/keeper"
+
+	seqkeeper "github.com/dymensionxyz/dymension-rdk/x/sequencers/keeper"
+	seqtypes "github.com/dymensionxyz/dymension-rdk/x/sequencers/types"
 )
 
 type AppKeepers struct {
@@ -109,6 +118,9 @@ type AppKeepers struct {
 	BeamKeeper         *beamkeeper.Keeper
 	DFractKeeper       *dfractkeeper.Keeper
 	MillionsKeeper     *millionskeeper.Keeper
+
+	//Dymension
+	SequencersKeeper seqkeeper.Keeper
 }
 
 // InitSpecialKeepers Init the "special" keepers in the order of definition
@@ -209,6 +221,12 @@ func (app *App) InitNormalKeepers() {
 	)
 	app.StakingKeeper = &stakingKeeper
 
+	// Initialize the dymension sequencer keeper
+	seqKeeper := *seqkeeper.NewKeeper(
+		appCodec, keys[seqtypes.StoreKey], app.GetSubspace(seqtypes.ModuleName),
+	)
+	app.SequencersKeeper = seqKeeper
+
 	// Initialize the distribution keeper
 	distrKeeper := distrkeeper.NewKeeper(
 		appCodec, keys[distrtypes.StoreKey],
@@ -216,9 +234,22 @@ func (app *App) InitNormalKeepers() {
 		app.AccountKeeper,
 		app.BankKeeper,
 		app.StakingKeeper,
+		&app.SequencersKeeper,
 		authtypes.FeeCollectorName,
+		map[string]bool{},
 	)
 	app.DistrKeeper = &distrKeeper
+
+	//FIXME: origial distr keeper, as airdrop and Millions expect this keeper (instead of expecting interface)
+	// Another distr keeper
+	sdkdistrkeeper := sdkdistrkeeper.NewKeeper(
+		appCodec, keys[distrtypes.StoreKey],
+		app.GetSubspace(distrtypes.ModuleName),
+		app.AccountKeeper,
+		app.BankKeeper,
+		app.StakingKeeper,
+		authtypes.FeeCollectorName,
+	)
 
 	// Initialize the slashing keeper
 	slashingKeeper := slashingkeeper.NewKeeper(
@@ -352,7 +383,7 @@ func (app *App) InitNormalKeepers() {
 		*app.AccountKeeper,
 		app.BankKeeper,
 		app.StakingKeeper,
-		app.DistrKeeper,
+		&sdkdistrkeeper,
 	)
 
 	// Initialize our custom dfract keeper
@@ -379,7 +410,7 @@ func (app *App) InitNormalKeepers() {
 		*app.ICACallbacksKeeper,
 		*app.ICQueriesKeeper,
 		app.BankKeeper,
-		app.DistrKeeper,
+		&sdkdistrkeeper,
 		app.StakingKeeper,
 	)
 
@@ -479,6 +510,9 @@ func (app *App) InitParamsKeeper(appCodec codec.BinaryCodec, legacyAmino *codec.
 	paramsKeeper.Subspace(beamtypes.ModuleName)
 	paramsKeeper.Subspace(dfracttypes.ModuleName)
 	paramsKeeper.Subspace(millionstypes.ModuleName)
+
+	//dymension
+	paramsKeeper.Subspace(seqtypes.ModuleName)
 
 	return paramsKeeper
 }
