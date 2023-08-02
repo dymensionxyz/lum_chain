@@ -42,6 +42,12 @@ import (
 
 	serverconfig "github.com/cosmos/cosmos-sdk/server/config"
 	tmcfg "github.com/tendermint/tendermint/config"
+
+	//dymension
+	pruningtypes "github.com/cosmos/cosmos-sdk/pruning/types"
+	rdkserver "github.com/dymensionxyz/dymension-rdk/server"
+	sequencercli "github.com/dymensionxyz/dymension-rdk/x/sequencers/client/cli"
+	dymintconf "github.com/dymensionxyz/dymint/config"
 )
 
 var ChainID string
@@ -64,6 +70,10 @@ func NewRootCmd() (*cobra.Command, params.EncodingConfig) {
 		Use:   appName + "d",
 		Short: "Lum Network App",
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
+			// set the default command outputs
+			cmd.SetOut(cmd.OutOrStdout())
+			cmd.SetErr(cmd.ErrOrStderr())
+
 			initClientCtx, err := client.ReadPersistentCommandFlags(initClientCtx, cmd.Flags())
 			if err != nil {
 				return err
@@ -78,9 +88,22 @@ func NewRootCmd() (*cobra.Command, params.EncodingConfig) {
 				return err
 			}
 
-			customTemplate, customGaiaConfig := initAppConfig()
 			customTMConfig := initTendermintConfig()
-			return server.InterceptConfigsPreRunHandler(cmd, customTemplate, customGaiaConfig, customTMConfig)
+			customAppTemplate, customAppConfig := initAppConfig()
+			err = server.InterceptConfigsPreRunHandler(
+				cmd, customAppTemplate, customAppConfig, customTMConfig,
+			)
+			if err != nil {
+				return err
+			}
+			serverCtx := server.GetServerContextFromCmd(cmd)
+
+			//create dymint toml config file
+			home := serverCtx.Viper.GetString(tmcli.HomeFlag)
+			chainID := client.GetClientContextFromCmd(cmd).ChainID
+			dymintconf.EnsureRoot(home, dymintconf.DefaultConfig(home, chainID))
+
+			return nil
 		},
 	}
 
@@ -102,6 +125,12 @@ func initTendermintConfig() *tmcfg.Config {
 func initAppConfig() (string, interface{}) {
 	srvCfg := serverconfig.DefaultConfig()
 	// Note: You can set any SDK application configuration options here
+
+	//Default pruning for a rollapp, represent 2 weeks of states kept while pruning in intervals of 10 minutes
+	srvCfg.Pruning = pruningtypes.PruningOptionCustom
+	srvCfg.PruningInterval = "18000"
+	srvCfg.PruningKeepRecent = "6048000"
+
 	return params.CustomConfigTemplate(), params.CustomAppConfig{
 		Config: *srvCfg,
 	}
@@ -135,11 +164,16 @@ func initRootCmd(rootCmd *cobra.Command, encodingConfig params.EncodingConfig) {
 		AddGenesisAccountCmd(app.DefaultNodeHome),
 		tmcli.NewCompletionCmd(rootCmd, true),
 		debug.Cmd(),
+		config.Cmd(),
 		pruning.PruningCmd(newApp),
 		snapshot.Cmd(newApp),
 	)
 
-	server.AddCommands(rootCmd, app.DefaultNodeHome, newApp, createSimappAndExport, addModuleInitFlags)
+	rootCmd.AddCommand(sequencercli.GenTxCmd())
+
+	// server.AddCommands(rootCmd, app.DefaultNodeHome, newApp, createSimappAndExport, addModuleInitFlags)
+	rdkserver.AddRollappCommands(rootCmd, app.DefaultNodeHome, newApp, createSimappAndExport, addModuleInitFlags)
+	rootCmd.AddCommand(StartCmd(newApp, app.DefaultNodeHome))
 
 	// add keybase, auxiliary RPC, query, and tx child commands
 	rootCmd.AddCommand(
